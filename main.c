@@ -16,62 +16,18 @@ In this example the PEripheral - Server sends notification to the Central for ev
 #define FALSE           0
 uint8 data[300] = {"CM:1""Dose""2 pills"}; //Initialisation of data
 
-#define WDT_COUNTER                 (CY_SYS_WDT_COUNTER1)
-#define WDT_COUNTER_MASK            (CY_SYS_WDT_COUNTER1_MASK)
-#define WDT_INTERRUPT_SOURCE        (CY_SYS_WDT_COUNTER1_INT) 
-#define WDT_COUNTER_ENABLE          (1u)
-#define WDT_100SEC                    (32767u)
-
 bool notificationsEnabled=false;
 
-uint32 Timer = 0;
+
 void StackEventHandler(uint32 event,void *eventParam);
 //Structure containing address of device 
 //Array which is used to store the list of devices added.
-
+void wifihandler();
 
 CYBLE_API_RESULT_T 		apiResult;
 
 uint8 startNotification;
 
-/*******************************************************************************
-* Function Name: StackEventHandler
-********************************************************************************
-* Summary:
-*        Call back event function to handle various events from BLE stack
-*
-* Parameters:
-*  event:		event returned
-*  eventParam:	link to value of the event parameter returned
-*
-* Return:
-*  void
-*
-*******************************************************************************/
-
-
-/*******************************************************************************
-* Function Name: SW_Interrupt
-********************************************************************************
-*
-* Summary:
-*   Handles the mechanical button press.
-*
-* Parameters:
-*   None
-*
-* Return:
-*   None
-*
-*******************************************************************************/
-
-//CY_ISR(WdtIsrHandler)
-//{
-//    /* Clear Interrupt */
-//    WdtIsr_ClearPending();
-//    Timer = 1;
-//    
-//}
 int printstopper(char* buff,char success[],char fail[]){
     uint32 ch=WIFI_UartGetChar();
     uint32 i=0;
@@ -136,7 +92,7 @@ char num2char(int a){
     }
 }
 
-void printnum(int num){
+void printnum(uint32 num){
     if(num==0){
         UART_UartPutString("Number:");
         return;
@@ -199,12 +155,8 @@ int get_field(char json[],int len,char name[],int nlen,uint8 value[]){
     return 0;
 }
 
-
-void StackEventHandler(uint32 event,void *eventParam)
+void wifihandler()
 {
-    
-    CYBLE_GATTS_WRITE_REQ_PARAM_T *wrReqParam;
-    
     uint8 d = '\r';
     uint8 e = '\n';
     uint8 s = '\"';
@@ -220,7 +172,7 @@ void StackEventHandler(uint32 event,void *eventParam)
     
         WIFI_UartPutString("AT+CWJAP=");
         WIFI_UartPutChar(s);
-        WIFI_UartPutString("Sherlocked");
+        WIFI_UartPutString("SherlockedExt");
         WIFI_UartPutChar(s);
         WIFI_UartPutChar(',');
         WIFI_UartPutChar(s);
@@ -520,12 +472,24 @@ void StackEventHandler(uint32 event,void *eventParam)
         p=get_field(json,len,"field6",6,dosage12);
         buff_print(dosage12,p);
 //        return 0;      
-      
+    
+}
 
+int q=0; 
+int w=0;
+void StackEventHandler(uint32 event,void *eventParam)
+{
+    
+    CYBLE_GATTS_WRITE_REQ_PARAM_T *wrReqParam;
     switch(event)
 	{
         
+        
+     
 		case CYBLE_EVT_STACK_ON:
+        UART_UartPutString("Event:");
+            printnum(event);
+
         UART_UartPutString ("Stack is ON\r\n");
             //Starting Advertisement as soon as Stack is ON
                         apiResult = CyBle_GappStartAdvertisement(CYBLE_ADVERTISING_FAST);
@@ -536,7 +500,8 @@ void StackEventHandler(uint32 event,void *eventParam)
             break;
             
         case CYBLE_EVT_TIMEOUT:
-         if( CYBLE_GAP_ADV_MODE_TO ==*(uint16*) eventParam)
+                
+                if( CYBLE_GAP_ADV_MODE_TO ==*(uint16*) eventParam)
             {
                 UART_UartPutString ("Advertisement TimedOut\r\n");
                 apiResult = CyBle_GappStartAdvertisement(CYBLE_ADVERTISING_FAST);
@@ -547,55 +512,42 @@ void StackEventHandler(uint32 event,void *eventParam)
             }
 		
 		case CYBLE_EVT_GATT_DISCONNECT_IND:
+            
             startNotification = 0;
 			/* Red LED Glows when device is disconnected */
             RED_LED_ON ();
             break;
             
         case CYBLE_EVT_GATTS_WRITE_REQ:
+            
             UART_UartPutString ("GATT_WRITE_REQ received\r\n");
-        wrReqParam = (CYBLE_GATTS_WRITE_REQ_PARAM_T *) eventParam;
-        if(CYBLE_SENDDATA_DATA_CLIENT_CHARACTERISTIC_CONFIGURATION_DESC_HANDLE == wrReqParam->handleValPair.attrHandle)
-        {
-        /* Only the first and second lowest significant bit can be
-        * set when writing on CCCD. If any other bit is set, then
-        * send error code */
-        if(FALSE == (wrReqParam->handleValPair.value.val[CYBLE_SENDDATA_DATA_CLIENT_CHARACTERISTIC_CONFIGURATION_DESC_INDEX] & (~CCCD_VALID_BIT_MASK)))
-        {
-        /* Set flag for application to know status of notifications.
-        * Only one byte is read as it contains the set value. */
-        startNotification = wrReqParam->handleValPair.value.val[0];
-        UART_UartPutString ("%d notification\r\n");
-        /* Update GATT DB with latest CCCD value */
-        CyBle_GattsWriteAttributeValue(&wrReqParam->handleValPair,FALSE, &cyBle_connHandle, CYBLE_GATT_DB_LOCALLY_INITIATED);
-        }
-        else
-        {
-            UART_UartPutString ("error GATT_WRITE\r\n");
-        /* Send error response for Invalid PDU against Write
-        * request */
-        CYBLE_GATTS_ERR_PARAM_T err_param;
-
-        err_param.opcode = CYBLE_GATT_WRITE_REQ;
-        err_param.attrHandle = wrReqParam->handleValPair.attrHandle;
-        err_param.errorCode = ERR_INVALID_PDU;
-        /* Send Error Response */
-        (void)CyBle_GattsErrorRsp(cyBle_connHandle, &err_param);
-        /* Return to main loop */
-        return;
-        }
-    }
-        //mady
-        /* Send response to the Write request */
-        CyBle_GattsWriteRsp(cyBle_connHandle);
+            wrReqParam = (CYBLE_GATTS_WRITE_REQ_PARAM_T *) eventParam;
+            if(CYBLE_SENDDATA_DATA_CLIENT_CHARACTERISTIC_CONFIGURATION_DESC_HANDLE == wrReqParam->handleValPair.attrHandle)
+                {
+                    if(FALSE == (wrReqParam->handleValPair.value.val[CYBLE_SENDDATA_DATA_CLIENT_CHARACTERISTIC_CONFIGURATION_DESC_INDEX] & (~CCCD_VALID_BIT_MASK)))
+                        {
+                            startNotification = wrReqParam->handleValPair.value.val[0];
+                            UART_UartPutString ("%d notification\r\n");
+                            CyBle_GattsWriteAttributeValue(&wrReqParam->handleValPair,FALSE, &cyBle_connHandle, CYBLE_GATT_DB_LOCALLY_INITIATED);
+                        }
+                     else
+                        {
+                            UART_UartPutString ("error GATT_WRITE\r\n");
+                            CYBLE_GATTS_ERR_PARAM_T err_param;
+                            err_param.opcode = CYBLE_GATT_WRITE_REQ;
+                            err_param.attrHandle = wrReqParam->handleValPair.attrHandle;
+                            err_param.errorCode = ERR_INVALID_PDU;
+                            (void)CyBle_GattsErrorRsp(cyBle_connHandle, &err_param);
+                            return;
+                        }
+                }
+            CyBle_GattsWriteRsp(cyBle_connHandle);
         break;
 
             
         case CYBLE_EVT_GAP_DEVICE_DISCONNECTED:
             UART_UartPutString ("Disconnected \r\n");
             
-            // Starting Advertisent again when there is disconnection
-
             break;
             
 			
@@ -608,15 +560,23 @@ void StackEventHandler(uint32 event,void *eventParam)
 
 		
 		case CYBLE_EVT_GAPP_ADVERTISEMENT_START_STOP:
+            
          // This Event is received when advertisement is started or stopped.
             if (CyBle_GetState() == CYBLE_STATE_ADVERTISING)
             {
+                UART_UartPutString("Event:");
+            printnum(event);
+
                 UART_UartPutString("Advertising...\r\n");
+                UART_UartPutString("Event:");
+            printnum(event);
+
                 //Green LED Indicates that Advertisement is going on.
                 GREEN_LED_ON();
             }
             else
             {
+                //ALL_LED_OFF();
                 RED_LED_ON();
                 UART_UartPutString ("Advertisement Stopped \r\n");
                
@@ -627,73 +587,19 @@ void StackEventHandler(uint32 event,void *eventParam)
 			break;
 	}
 }
-// Watchdog Timer's ISR which sets the Timer Flag high every 100 mS
-void Timer_Interrupt(void)
-{
-    if(CySysWdtGetInterruptSource() & WDT_INTERRUPT_SOURCE)
-    {
-        Timer = 1;
-        
-        /* Clears interrupt request  */
-        CySysWdtClearInterrupt(WDT_INTERRUPT_SOURCE);
-    }
-}
 
-//Start and Configure the Watchdog Timer
-void WDT_Start(void)
-{
-    /* Unlock the WDT registers for modification */
-    CySysWdtUnlock(); 
-    /* Setup ISR callback */
-    WdtIsr_StartEx(Timer_Interrupt);
-    /* Write the mode to generate interrupt on match */
-    CySysWdtWriteMode(WDT_COUNTER, CY_SYS_WDT_MODE_INT);
-    /* Configure the WDT counter clear on a match setting */
-    CySysWdtWriteClearOnMatch(WDT_COUNTER, WDT_COUNTER_ENABLE);
-    /* Configure the WDT counter match comparison value */
-    CySysWdtWriteMatch(WDT_COUNTER, WDT_100SEC);
-    /* Reset WDT counter */
-    CySysWdtResetCounters(WDT_COUNTER);
-    /* Enable the specified WDT counter */
-    CySysWdtEnable(WDT_COUNTER_MASK);
-    /* Lock out configuration changes to the Watchdog timer registers */
-    CySysWdtLock();    
-}
-
-/*******************************************************************************
-* Function Name: main
-********************************************************************************
-*
-* Summary:
-*  System entry and execution point for application
-*
-* Parameters:  
-*  None
-*
-* Return: 
-*  int
-
-********************************************************************************/
 
 int main()
 {
-  UART_Start();
-    /* Initializing all the Flags and Indexes to 0 */
-    ALL_LED_OFF ();
   
-    
+    ALL_LED_OFF ();  
+   
     CyGlobalIntEnable;  /* Comment this line to disable global interrupts. */
     
     /* Start BLE component and register Event handler function */	
+    wifihandler();
     CyBle_Start(StackEventHandler);
-
-    
-   
-    
-    //This Flag is set every 100 mS by the Watchdog Timer for sending notifications
-    Timer = 0;
-    //Start the Watchdog Timer
-    WDT_Start();
+    CyBle_ProcessEvents();
     
     for(;;)
     {
@@ -704,15 +610,14 @@ int main()
    
         //Send Notification after every 100 mS  
         
-        if(Timer)
-        {       
-            Timer = 0;
             /* 'notificationHandle' is handle to store notification data parameters */
             CYBLE_GATTS_HANDLE_VALUE_NTF_T notificationHandle;
             /* Check if the notification bit is set or not */
+            
             if(startNotification & NOTIFY_BIT_MASK)
             {
-             /* Update Notification handle with new data*/
+                
+             
                 notificationHandle.attrHandle = CYBLE_SENDDATA_DATA_CHAR_HANDLE;
                 notificationHandle.value.val = &data;
                 notificationHandle.value.len = 15;
@@ -731,6 +636,6 @@ int main()
             
         }
     }
-}
+
 
 /* [] END OF FILE */
